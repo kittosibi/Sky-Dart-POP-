@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#8edcff">
-  <title>Sky Dart Pop</title>
+  <title>Sky Dart Pop · KittoSibi</title>
   <style>
     :root { color-scheme: light; font-family: ui-rounded, "Trebuchet MS", system-ui, sans-serif; }
     * { box-sizing: border-box; }
@@ -25,6 +25,21 @@
     button:active { transform: translateY(3px); box-shadow: 0 2px 0 #e38b23; }
     .small { display: block; margin-top: 17px; color: #6b95a9; font-size: 12px; }
     [hidden] { display: none !important; }
+
+    /* Intro branding overlay: video URL is configured in the script below. */
+    #introScreen { z-index: 10; background: radial-gradient(ellipse at 50% 35%, rgba(32,117,166,.48), rgba(13,54,91,.94)); color: white; }
+    #introVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(145deg, #53bde9, #144a78); }
+    #introScreen::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,32,63,.22), rgba(7,32,63,.7)); pointer-events: none; }
+    .intro-content { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 13px; text-align: center; text-shadow: 0 2px 16px rgba(0,0,0,.4); }
+    .brand-logo { display: block; max-width: min(54vw, 230px); max-height: 150px; object-fit: contain; }
+    .brand-name { margin: 0; color: white; font-size: clamp(27px, 7vw, 42px); letter-spacing: .02em; }
+    .brand-tagline { margin: 0; font-size: 14px; font-weight: 600; opacity: .9; }
+    #introMessage { min-height: 1.4em; margin: 2px 0; font-size: 14px; }
+    #skipIntro { margin-top: 8px; }
+    #watermark { position: absolute; z-index: 3; right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 7px; max-width: min(45vw, 230px); padding: 6px 9px; border-radius: 12px; background: rgba(15,54,80,.2); color: rgba(255,255,255,.78); opacity: .62; pointer-events: none; }
+    #watermark img { display: block; max-width: 76px; max-height: 32px; object-fit: contain; }
+    #watermark strong { display: block; font-size: 12px; line-height: 1.1; }
+    #watermark small { display: block; margin-top: 2px; font-size: 8px; line-height: 1.1; }
     @media (max-width: 420px) { .hud { gap: 7px; padding: 0 8px; } .pill { min-width: 88px; padding: 8px 11px; font-size: 11px; } .pill strong { font-size: 19px; } .hint { font-size: 12px; } }
   </style>
 </head>
@@ -37,7 +52,11 @@
       <div class="pill">Missed<strong id="missed">0 / 10</strong></div>
     </div>
     <div class="hint" id="hint">Aim with your finger or mouse · Tap / click to shoot</div>
-    <section class="overlay" id="startScreen">
+    <div id="watermark" aria-label="KittoSibi — Shivam Mahapatra animations">
+      <img id="watermarkLogo" alt="" hidden>
+      <span><strong>KittoSibi</strong><small>Shivam Mahapatra animations</small></span>
+    </div>
+    <section class="overlay" id="startScreen" hidden>
       <div class="card">
         <span class="badge">A little sky-high fun</span>
         <h1>Sky Dart<br>Pop!</h1>
@@ -55,10 +74,26 @@
         <span class="small">Ready for another round?</span>
       </div>
     </section>
+    <section class="overlay" id="introScreen" aria-label="KittoSibi intro">
+      <video id="introVideo" muted playsinline preload="auto" aria-hidden="true"></video>
+      <div class="intro-content">
+        <img class="brand-logo" id="introLogo" alt="KittoSibi logo" hidden>
+        <h1 class="brand-name" id="brandFallback">KittoSibi</h1>
+        <p class="brand-tagline">Shivam Mahapatra animations</p>
+        <p id="introMessage">Welcome to Sky Dart Pop</p>
+        <button id="skipIntro" type="button">Continue</button>
+      </div>
+    </section>
   </main>
 <script>
 (() => {
   'use strict';
+
+  // Replace these placeholders with your hosted or relative asset paths.
+  const INTRO_VIDEO_URL = 'PASTE_INTRO_VIDEO_URL_HERE';
+  const LOGO_IMAGE_URL = 'PASTE_LOGO_IMAGE_URL_HERE';
+  const DEFAULT_ASSET = /^PASTE_.*_HERE$/;
+
   const canvas = document.querySelector('#scene');
   const ctx = canvas.getContext('2d');
   const scoreEl = document.querySelector('#score');
@@ -66,13 +101,53 @@
   const missedEl = document.querySelector('#missed');
   const startScreen = document.querySelector('#startScreen');
   const endScreen = document.querySelector('#endScreen');
+  const introScreen = document.querySelector('#introScreen');
+  const introVideo = document.querySelector('#introVideo');
+  const introMessage = document.querySelector('#introMessage');
+  const introLogo = document.querySelector('#introLogo');
+  const watermarkLogo = document.querySelector('#watermarkLogo');
+  const brandFallback = document.querySelector('#brandFallback');
   const hint = document.querySelector('#hint');
   let w = 0, h = 0, dpr = 1, last = 0, elapsed = 0, spawnClock = 0;
   let score = 0, missed = 0, playing = false, balloons = [], darts = [], particles = [], clouds = [];
-  let aim = { x: 0, y: 0 }, audioContext;
+  let aim = { x: 0, y: 0 }, audioContext, introFinished = false;
   const colors = ['#ff5e7e', '#ffb52e', '#8e75ef', '#39c995', '#36b8e8', '#ff79c8'];
   const rand = (a, b) => a + Math.random() * (b - a);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  function setLogo(img) {
+    if (!LOGO_IMAGE_URL || DEFAULT_ASSET.test(LOGO_IMAGE_URL)) return;
+    img.src = LOGO_IMAGE_URL;
+    img.hidden = false;
+    img.addEventListener('error', () => { img.hidden = true; if (img === introLogo) brandFallback.hidden = false; }, { once: true });
+    if (img === introLogo) img.addEventListener('load', () => { brandFallback.hidden = true; }, { once: true });
+  }
+  setLogo(introLogo);
+  setLogo(watermarkLogo);
+
+  function finishIntro(message = '') {
+    if (introFinished) return;
+    introFinished = true;
+    if (message) introMessage.textContent = message;
+    introVideo.pause();
+    introScreen.classList.add('intro-leaving');
+    introScreen.style.transition = 'opacity .55s ease';
+    introScreen.style.opacity = '0';
+    window.setTimeout(() => { introScreen.hidden = true; startScreen.hidden = false; }, 560);
+  }
+  document.querySelector('#skipIntro').addEventListener('click', () => finishIntro());
+  introVideo.addEventListener('ended', () => finishIntro());
+  introVideo.addEventListener('error', () => { introMessage.textContent = 'Intro video unavailable — continue when you’re ready.'; });
+  introVideo.addEventListener('playing', () => { introMessage.textContent = ' '; });
+  if (INTRO_VIDEO_URL && !DEFAULT_ASSET.test(INTRO_VIDEO_URL)) {
+    introVideo.src = INTRO_VIDEO_URL;
+    const playAttempt = introVideo.play();
+    if (playAttempt && typeof playAttempt.catch === 'function') playAttempt.catch(() => {
+      introMessage.textContent = 'Video playback was blocked — tap continue to play.';
+    });
+  } else {
+    introMessage.textContent = 'Add your intro video URL here, or continue to the game.';
+  }
 
   function resize() {
     const rect = canvas.getBoundingClientRect();
